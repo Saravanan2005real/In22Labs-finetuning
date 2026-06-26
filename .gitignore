@@ -1,0 +1,29 @@
+# Virtual Environment
+finetune_env/
+env/
+venv/
+.venv/
+
+# Local Model weights & adapters
+llama_base_model/
+lora_model/
+training_dir/
+
+# Elasticsearch local install & archives
+elasticsearch-8.17.0/
+elasticsearch.zip
+
+# Python temporary files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Editor/System specific files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
