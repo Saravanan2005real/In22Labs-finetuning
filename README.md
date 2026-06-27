@@ -48,11 +48,11 @@ flowchart TD
 
 ## 🌟 Key Features
 
-- **Document Parsing**: Automatic PDF extraction using Microsoft's `MarkItDown` library, handling clean title structures and section separations.
+- **Document Parsing**: Automatic PDF extraction using Microsoft's `MarkItDown` library (optimized with deduplication to run twice as fast on Windows).
 - **Hybrid System Status**: Real-time status checks showing whether Elasticsearch and the LLM engine are online or offline.
-- **RAG & Citations**: Chatbot answers are grounded in official law sections retrieved via Elasticsearch, displaying verified citation badges with source details.
-- **Optimized Fine-Tuning**: Uses standard PEFT (Hugging Face) with 4-bit quantization, with built-in fast acceleration support via `Unsloth` (4-5x faster).
-- **Interactive UI**: A premium dark-themed UI featuring glassmorphism design, smooth message transitions, suggested questions, and source preview popups.
+- **Strict Grounded RAG**: Chatbot answers are strictly grounded in official law sections retrieved via Elasticsearch, preventing hallucinations and staying faithful to the document.
+- **Optimized Fine-Tuning**: Uses standard PEFT (Hugging Face) with 4-bit quantization, with built-in fast acceleration support via `Unsloth` (4-5x faster), automatically handling GPU absence gracefully.
+- **Interactive UI**: A premium dark-themed UI featuring glassmorphism design, smooth message transitions, suggested questions, and real-time word-by-word streaming typing effects.
 - **Pipeline Automation**: A single automation PowerShell runner (`run_pipeline.ps1`) to orchestrate extraction, training, and deployment steps.
 
 ---
@@ -127,7 +127,7 @@ Fine-tune the local base model (`llama_base_model`) on the generated dataset. Th
 ### Step 3: Run the Server
 Launch the Flask chatbot server.
 
-**Standard GPU Mode** (Requires GPU with model loaded):
+**Standard Mode** (Runs on GPU if available, falls back to CPU automatically):
 ```powershell
 .\run_pipeline.ps1 -Action serve
 ```
