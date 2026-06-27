@@ -756,29 +756,30 @@
             
             const bubbleDiv = document.createElement('div');
             bubbleDiv.className = 'bubble';
-            bubbleDiv.textContent = text;
-            
-            if (citations && citations.length > 0) {
-                const citationsDiv = document.createElement('div');
-                citationsDiv.className = 'citations';
-                citationsDiv.innerHTML = '<strong>Verified Sources (Elasticsearch):</strong><br>';
-                
-                citations.forEach(cit => {
-                    const badge = document.createElement('span');
-                    badge.className = 'citation-badge';
-                    badge.title = cit.content.substring(0, 150) + '...';
-                    badge.innerHTML = `<i class="fa-solid fa-bookmark"></i> ${cit.act_name} - Sec ${cit.section_num}`;
-                    badge.onclick = () => alert(`Source: ${cit.act_name}\nSection: ${cit.section_num} - ${cit.section_title}\n\n${cit.content}`);
-                    citationsDiv.appendChild(badge);
-                });
-                
-                bubbleDiv.appendChild(citationsDiv);
-            }
             
             messageDiv.appendChild(avatarDiv);
             messageDiv.appendChild(bubbleDiv);
             messagesContainer.appendChild(messageDiv);
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            
+            if (sender === 'user') {
+                bubbleDiv.textContent = text;
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            } else {
+                // Word-by-word typing effect to make the chatbot feel "realtime"
+                let i = 0;
+                const words = text.split(' ');
+                bubbleDiv.textContent = '';
+                
+                const timer = setInterval(() => {
+                    if (i < words.length) {
+                        bubbleDiv.textContent += (i === 0 ? '' : ' ') + words[i];
+                        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                        i++;
+                    } else {
+                        clearInterval(timer);
+                    }
+                }, 30); // Types a new word every 30ms for a natural streaming speed
+            }
         }
 
         function showTypingIndicator() {

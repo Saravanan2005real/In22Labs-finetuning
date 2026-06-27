@@ -84,7 +84,7 @@ def clean_act_name(filename):
 
 def main():
     pdf_dir = "Act_Elastic search"
-    pdf_files = glob.glob(os.path.join(pdf_dir, "*.pdf")) + glob.glob(os.path.join(pdf_dir, "*.PDF"))
+    pdf_files = list(set(glob.glob(os.path.join(pdf_dir, "*.pdf")) + glob.glob(os.path.join(pdf_dir, "*.PDF"))))
     
     print(f"Found {len(pdf_files)} PDF files to process.")
     
@@ -93,9 +93,10 @@ def main():
     md = MarkItDown()
     
     # Initialize Elasticsearch client
-    print("Connecting to Elasticsearch (127.0.0.1:9200)...")
+    es_url = os.environ.get("ELASTICSEARCH_URL", "http://127.0.0.1:9200")
+    print(f"Connecting to Elasticsearch ({es_url})...")
     # Using basic connection (local development, security disabled)
-    es = Elasticsearch("http://127.0.0.1:9200", request_timeout=30)
+    es = Elasticsearch(es_url, request_timeout=30)
     
     index_name = "legal_acts"
     try:

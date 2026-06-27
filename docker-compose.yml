@@ -1,0 +1,44 @@
+services:
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.0
+    container_name: lexai-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - xpack.security.enrollment.enabled=false
+      - xpack.security.http.ssl.enabled=false
+      - xpack.security.transport.ssl.enabled=false
+      - xpack.ml.enabled=false
+      - cluster.routing.allocation.disk.threshold_enabled=false
+      - ES_JAVA_OPTS=-Xms1g -Xmx1g
+    ports:
+      - "9200:9200"
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200 >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    container_name: lexai-app
+    ports:
+      - "5000:5000"
+    environment:
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - MOCK_MODE=true # Set to false to use actual model (requires GPU and weights loaded)
+    volumes:
+      - ./lora_model:/app/lora_model
+      - ./llama_base_model:/app/llama_base_model
+      - ./Act_Elastic search:/app/Act_Elastic search
+      - ./templates:/app/templates
+      - ./dataset.json:/app/dataset.json
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+
+volumes:
+  es_data:
+    driver: local

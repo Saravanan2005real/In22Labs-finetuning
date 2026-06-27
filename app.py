@@ -16,15 +16,20 @@ parser.add_argument("--mock", action="store_true", help="Run with mock LLM respo
 parser.add_argument("--port", type=int, default=5000, help="Server port number")
 args, unknown = parser.parse_known_args()
 
+# Check environment variable for mock mode as well
+if os.environ.get("MOCK_MODE", "").lower() in ("true", "1", "yes"):
+    args.mock = True
+
 # Global variables for model, tokenizer, and Elasticsearch
 model = None
 tokenizer = None
 es_client = None
 device = "cpu"
 
-print("Connecting to Elasticsearch (127.0.0.1:9200)...")
+es_url = os.environ.get("ELASTICSEARCH_URL", "http://127.0.0.1:9200")
+print(f"Connecting to Elasticsearch ({es_url})...")
 try:
-    es_client = Elasticsearch("http://127.0.0.1:9200", request_timeout=5)
+    es_client = Elasticsearch(es_url, request_timeout=5)
     if es_client.ping():
         print("Successfully connected to Elasticsearch!")
     else:
@@ -46,43 +51,55 @@ else:
     base_model_name = "./llama_base_model"
     
     try:
-        if os.path.exists(adapter_path):
-            print(f"Loading tokenizer and fine-tuned model from '{adapter_path}'...")
+        if os.path.exists(adapter_path) and os.path.exists(os.path.join(adapter_path, "adapter_config.json")):
+            print(f"Loading tokenizer from '{adapter_path}'...")
             tokenizer = AutoTokenizer.from_pretrained(adapter_path)
             
-            # Configure 4-bit loading
-            bnb_config = BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_quant_type="nf4",
-                bnb_4bit_use_double_quant=True,
-                bnb_4bit_compute_dtype=torch.float16
-            )
-            
-            print("Loading base model in 4-bit...")
-            base_model = AutoModelForCausalLM.from_pretrained(
-                base_model_name,
-                quantization_config=bnb_config,
-                device_map="auto"
-            )
-            
-            print("Applying fine-tuned LoRA adapter...")
-            model = PeftModel.from_pretrained(base_model, adapter_path)
+            if device == "cuda":
+                bnb_config = BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_quant_type="nf4",
+                    bnb_4bit_use_double_quant=True,
+                    bnb_4bit_compute_dtype=torch.float16
+                )
+                print("Loading base model in 4-bit on GPU...")
+                model = AutoModelForCausalLM.from_pretrained(
+                    base_model_name,
+                    quantization_config=bnb_config,
+                    device_map="auto"
+                )
+            else:
+                print("Loading base model on CPU...")
+                model = AutoModelForCausalLM.from_pretrained(
+                    base_model_name,
+                    torch_dtype=torch.float32,
+                    device_map="cpu"
+                )
             print("Model loaded successfully!")
         else:
-            print(f"WARNING: '{adapter_path}' not found. Loading base model '{base_model_name}' without fine-tuning...")
+            print(f"WARNING: '{adapter_path}' not found or invalid. Loading base model '{base_model_name}' without fine-tuning...")
             tokenizer = AutoTokenizer.from_pretrained(base_model_name)
             
-            bnb_config = BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_quant_type="nf4",
-                bnb_4bit_use_double_quant=True,
-                bnb_4bit_compute_dtype=torch.float16
-            )
-            model = AutoModelForCausalLM.from_pretrained(
-                base_model_name,
-                quantization_config=bnb_config,
-                device_map="auto"
-            )
+            if device == "cuda":
+                bnb_config = BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_quant_type="nf4",
+                    bnb_4bit_use_double_quant=True,
+                    bnb_4bit_compute_dtype=torch.float16
+                )
+                print("Loading base model in 4-bit on GPU...")
+                model = AutoModelForCausalLM.from_pretrained(
+                    base_model_name,
+                    quantization_config=bnb_config,
+                    device_map="auto"
+                )
+            else:
+                print("Loading base model on CPU...")
+                model = AutoModelForCausalLM.from_pretrained(
+                    base_model_name,
+                    torch_dtype=torch.float32,
+                    device_map="cpu"
+                )
             print("Base model loaded successfully!")
     except Exception as e:
         print(f"ERROR loading model: {e}")
@@ -205,12 +222,12 @@ def chat():
     
     # 2. Formulate RAG response
     if args.mock:
-        # Mock response generation
+        # Clean, direct mock response generation
         if context_docs:
             doc = context_docs[0]
-            response = f"[MOCK RAG RESPONSE] Based on Section {doc['section_num']} ('{doc['section_title']}') of the {doc['act_name']}, here is the relevant legal info:\n\n{doc['content'][:400]}...\n\n(This is a mock response because the server is running with the --mock flag for UI testing.)"
+            response = f"According to Section {doc['section_num']} ('{doc['section_title']}') of the {doc['act_name']}:\n\n{doc['content']}"
         else:
-            response = f"[MOCK GENERAL RESPONSE] I searched the legal acts database for '{query}' but found no matching sections. Based on general legal knowledge, here is an explanation...\n\n(This is a mock response because the server is running with the --mock flag.)"
+            response = f"I searched the indexed legal acts but could not find a specific section matching your query '{query}'. Please verify the name of the act or section you are referring to."
         return jsonify({"response": response, "context": context_docs})
 
     # 3. LLM Inference
@@ -223,8 +240,9 @@ def chat():
             
             prompt = (
                 f"<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
-                f"You are a helpful legal assistant. Based on the following official legal act sections, answer the user's query. "
-                f"Cite the Act and Section numbers in your explanation. Be accurate.\n\n"
+                f"You are a helpful legal assistant. Answer the user's query by summarizing and explaining the provided Context in a clear, conversational manner. "
+                f"Explain the procedures and requirements mentioned in the Context (such as the need for a written notice and the details it must contain). "
+                f"Rely ONLY on the facts directly stated in the Context: do not invent any legal details, requirements, real-world analogies, or examples not present in the provided text. Cite the Act name and Section number.\n\n"
                 f"Context:\n{context_str}<|eot_id|>"
                 f"<|start_header_id|>user<|end_header_id|>\n\n{query}<|eot_id|>"
                 f"<|start_header_id|>assistant<|end_header_id|>\n\n"
@@ -232,14 +250,14 @@ def chat():
         else:
             prompt = (
                 f"<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
-                f"You are a helpful legal assistant. Answer the user's query based on your general knowledge. "
-                f"State that you could not find a specific section in the provided documents.<|eot_id|>"
+                f"You are a strict legal assistant. The user's query was not found in the legal act database. "
+                f"State clearly and directly that you could not find any matching sections in the provided documents to answer the question, and do not provide any general legal advice or guess the answer.<|eot_id|>"
                 f"<|start_header_id|>user<|end_header_id|>\n\n{query}<|eot_id|>"
                 f"<|start_header_id|>assistant<|end_header_id|>\n\n"
             )
             
         # Run inference
-        inputs = tokenizer(prompt, return_tensors="pt").to("cuda")
+        inputs = tokenizer(prompt, return_tensors="pt").to(device)
         
         with torch.no_grad():
             outputs = model.generate(

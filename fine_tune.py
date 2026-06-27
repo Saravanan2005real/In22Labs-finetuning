@@ -7,9 +7,9 @@ try:
     from unsloth import FastLanguageModel
     HAS_UNSLOTH = True
     print("SUCCESS: Unsloth library found! Using Unsloth for fast fine-tuning.")
-except ImportError:
+except Exception as e:
     HAS_UNSLOTH = False
-    print("WARNING: Unsloth not found. Falling back to standard Hugging Face PEFT LoRA fine-tuning.")
+    print(f"WARNING: Unsloth not usable ({e}). Falling back to standard Hugging Face PEFT LoRA fine-tuning.")
     from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, TrainingArguments
     from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 
@@ -30,6 +30,15 @@ def formatting_prompts_func(examples):
     return { "text" : texts }
 
 def main():
+    if not torch.cuda.is_available():
+        print("\n" + "="*85)
+        print("ERROR: Fine-tuning requires a CUDA-compatible GPU, but none was detected by PyTorch.")
+        print("If you are running on a machine without a GPU, please skip the training step")
+        print("and run the server in Mock Mode:")
+        print("  .\\run_pipeline.ps1 -Action serve-mock")
+        print("="*85 + "\n")
+        return
+
     print("Loading dataset...")
     if not os.path.exists("dataset.json"):
         print("ERROR: dataset.json not found! Please run extract_and_index.py first.")
