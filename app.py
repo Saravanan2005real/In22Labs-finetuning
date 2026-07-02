@@ -115,14 +115,18 @@ else:
         args.mock = True
 
 def tokenize(text):
+    """
+    Simple tokenizer for search matching. Preserves numeric tokens of any length.
+    """
     text = text.lower()
     text = text.translate(str.maketrans('', '', string.punctuation))
-    return [w for w in text.split() if len(w) > 2]
+    return [w for w in text.split() if len(w) > 2 or w.isdigit()]
 
 def search_legal_acts(query, limit=3):
     """
     Search legal acts using in-memory local sections database.
     """
+    import re
     sections = load_sections()
     if not sections:
         return []
@@ -140,17 +144,31 @@ def search_legal_acts(query, limit=3):
         content = sec.get('content', '').lower()
         
         for token in query_tokens:
+            pattern = r'\b' + re.escape(token) + r'\b'
+            
             if token == section_num:
+                score += 100
+                
+            # Act name matching (exact word vs substring)
+            if re.search(pattern, act_name):
+                score += 150
+            else:
+                if token in act_name:
+                    score += 5
+                    
+            # Section title matching (exact word vs substring)
+            if re.search(pattern, section_title):
                 score += 50
-            # Title matches have high importance
-            title_count = section_title.count(token)
-            score += title_count * 10
-            # Act name matches have medium importance
-            act_count = act_name.count(token)
-            score += act_count * 5
-            # Content matches have base importance
-            content_count = content.count(token)
-            score += content_count * 1
+            else:
+                if token in section_title:
+                    score += 10
+                    
+            # Content matching (exact word vs substring)
+            if re.search(pattern, content):
+                score += 5 * len(re.findall(pattern, content))
+            else:
+                if token in content:
+                    score += 1
             
         if score > 0:
             scored_sections.append((score, sec))
@@ -206,25 +224,39 @@ def get_acts():
 def chat():
     """
     Chat endpoint.
-    Retrieves context from Elasticsearch, builds prompt, and runs LLM inference.
+    Retrieves context from local database, builds prompt, and runs LLM inference.
     """
+    import re
     data = request.json or {}
     query = data.get("query", "").strip()
     
     if not query:
         return jsonify({"response": "Please specify a query.", "context": []})
     
-    # 1. Search relevant documents in Elasticsearch
+    # 1. Search relevant documents in local in-memory dataset
     context_docs = search_legal_acts(query)
     
     # 2. Formulate RAG response
     if args.mock:
-        # Clean, direct mock response generation
+        # Clean, direct mock response generation with validation
         if context_docs:
             doc = context_docs[0]
-            response = f"According to Section {doc['section_num']} ('{doc['section_title']}') of the {doc['act_name']}:\n\n{doc['content']}"
+            query_numbers = re.findall(r'\b\d+\b', query)
+            is_valid = True
+            if query_numbers:
+                doc_title_text = f"{doc.get('act_name', '')} {doc.get('section_num', '')} {doc.get('section_title', '')}".lower()
+                for num in query_numbers:
+                    if len(num) <= 4: # G.O. numbers or section numbers are short
+                        if num not in doc_title_text:
+                            is_valid = False
+                            break
+            
+            if is_valid:
+                response = f"According to Section {doc['section_num']} ('{doc['section_title']}') of the {doc['act_name']}:\n\n{doc['content']}"
+            else:
+                response = "The provided context does not contain the answer for this question."
         else:
-            response = f"I searched the indexed legal acts but could not find a specific section matching your query '{query}'. Please verify the name of the act or section you are referring to."
+            response = "The provided context does not contain the answer for this question."
         return jsonify({"response": response, "context": context_docs})
 
     # 3. LLM Inference
@@ -237,9 +269,13 @@ def chat():
             
             prompt = (
                 f"<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
-                f"You are a helpful legal assistant. Answer the user's query by summarizing and explaining the provided Context in a clear, conversational manner. "
-                f"Explain the procedures and requirements mentioned in the Context (such as the need for a written notice and the details it must contain). "
-                f"Rely ONLY on the facts directly stated in the Context: do not invent any legal details, requirements, real-world analogies, or examples not present in the provided text. Cite the Act name and Section number.\n\n"
+                f"You are a strict legal/government order assistant.\n\n"
+                f"Answer the user's query relying ONLY on the provided Context. "
+                f"First, identify the exact G.O. number, department, date, and subject from the Context.\n"
+                f"If the retrieved Context is about a different G.O. or a different subject than what the user query asks about, say exactly:\n"
+                f"\"The provided context does not contain the answer for this question.\"\n\n"
+                f"Do not mix information from other documents. Do not answer from general knowledge or assume any missing details. "
+                f"Give a short, direct answer with the source G.O. number.\n\n"
                 f"Context:\n{context_str}<|eot_id|>"
                 f"<|start_header_id|>user<|end_header_id|>\n\n{query}<|eot_id|>"
                 f"<|start_header_id|>assistant<|end_header_id|>\n\n"
