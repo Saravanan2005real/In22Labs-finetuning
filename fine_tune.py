@@ -2,17 +2,6 @@ import os
 import json
 from datasets import Dataset
 import torch
-
-try:
-    from unsloth import FastLanguageModel
-    HAS_UNSLOTH = True
-    print("SUCCESS: Unsloth library found! Using Unsloth for fast fine-tuning.")
-except Exception as e:
-    HAS_UNSLOTH = False
-    print(f"WARNING: Unsloth not usable ({e}). Falling back to standard Hugging Face PEFT LoRA fine-tuning.")
-    from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, TrainingArguments
-    from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
-
 from trl import SFTTrainer, SFTConfig
 
 # Constants
@@ -39,9 +28,10 @@ def main():
         print("="*85 + "\n")
         return
 
+    from unsloth import FastLanguageModel
     print("Loading dataset...")
     if not os.path.exists("dataset.json"):
-        print("ERROR: dataset.json not found! Please run extract_and_index.py first.")
+        print("ERROR: dataset.json not found! Please run extract_to_json.py first.")
         return
 
     with open("dataset.json", "r", encoding="utf-8") as f:
@@ -51,64 +41,30 @@ def main():
     dataset = Dataset.from_list(data)
     dataset = dataset.map(formatting_prompts_func, batched=True)
 
-    if HAS_UNSLOTH:
-        # Load model & tokenizer using Unsloth
-        model, tokenizer = FastLanguageModel.from_pretrained(
-            model_name = MODEL_NAME,
-            max_seq_length = MAX_SEQ_LENGTH,
-            dtype = None,  # None for auto detection
-            load_in_4bit = True,  # Reduced memory usage
-        )
+    # Load model & tokenizer using Unsloth
+    print("Loading base model using Unsloth...")
+    model, tokenizer = FastLanguageModel.from_pretrained(
+        model_name = MODEL_NAME,
+        max_seq_length = MAX_SEQ_LENGTH,
+        dtype = None,  # None for auto detection
+        load_in_4bit = True,  # Reduced memory usage
+    )
 
-        model = FastLanguageModel.get_peft_model(
-            model,
-            r = 16,
-            target_modules = ["q_proj", "k_proj", "v_proj", "o_proj",
-                              "gate_proj", "up_proj", "down_proj"],
-            lora_alpha = 16,
-            lora_dropout = 0,
-            bias = "none",
-            use_gradient_checkpointing = "unsloth",  # Unsloth optimized gradient checkpointing
-            random_state = 3407,
-            use_rslora = False,
-            loftq_config = None,
-        )
-    else:
-        # Load model & tokenizer using standard HF Hub with bitsandbytes 4-bit config
-        print("Configuring 4-bit quantization for base model...")
-        bnb_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_use_double_quant=True,
-            bnb_4bit_compute_dtype=torch.float16
-        )
+    model = FastLanguageModel.get_peft_model(
+        model,
+        r = 16,
+        target_modules = ["q_proj", "k_proj", "v_proj", "o_proj",
+                          "gate_proj", "up_proj", "down_proj"],
+        lora_alpha = 16,
+        lora_dropout = 0,
+        bias = "none",
+        use_gradient_checkpointing = "unsloth",  # Unsloth optimized gradient checkpointing
+        random_state = 3407,
+        use_rslora = False,
+        loftq_config = None,
+    )
 
-        print(f"Downloading base model {MODEL_NAME} from Hugging Face...")
-        tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-        tokenizer.pad_token = tokenizer.eos_token
-        
-        model = AutoModelForCausalLM.from_pretrained(
-            MODEL_NAME,
-            quantization_config=bnb_config,
-            device_map="auto"
-        )
-        
-        # Prepare for training and configure PEFT LoRA
-        model = prepare_model_for_kbit_training(model)
-        
-        peft_config = LoraConfig(
-            r=16,
-            lora_alpha=16,
-            target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
-                            "gate_proj", "up_proj", "down_proj"],
-            lora_dropout=0.05,
-            bias="none",
-            task_type="CAUSAL_LM"
-        )
-        model = get_peft_model(model, peft_config)
-        model.config.use_cache = False  # Must disable when using gradient checkpointing
-
-    print("Model loaded and wrapped with LoRA.")
+    print("Model loaded and wrapped with LoRA using Unsloth.")
     model.print_trainable_parameters()
 
     # Training Arguments

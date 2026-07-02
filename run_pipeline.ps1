@@ -17,8 +17,8 @@ if (-not (Test-Path "finetune_env\Scripts\activate.ps1")) {
 
 switch ($Action) {
     "extract" {
-        Write-Host "=== STEP 1: Extracting text from PDFs and Indexing in Elasticsearch ===" -ForegroundColor Cyan
-        python extract_and_index.py
+        Write-Host "=== STEP 1: Extracting text from PDFs and converting to JSON ===" -ForegroundColor Cyan
+        python extract_to_json.py
     }
     
     "train" {

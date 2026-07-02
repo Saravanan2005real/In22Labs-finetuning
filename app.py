@@ -1,17 +1,18 @@
 import os
 import sys
+import json
+import string
 from datasets import Dataset
 import torch
 import argparse
 from flask import Flask, render_template, request, jsonify
-from elasticsearch import Elasticsearch
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from peft import PeftModel
 
 app = Flask(__name__)
 
 # Parse command line arguments
-parser = argparse.ArgumentParser(description="Legal RAG Chatbot Server")
+parser = argparse.ArgumentParser(description="Legal Chatbot Server")
 parser.add_argument("--mock", action="store_true", help="Run with mock LLM responses for quick UI testing")
 parser.add_argument("--port", type=int, default=5000, help="Server port number")
 args, unknown = parser.parse_known_args()
@@ -20,22 +21,29 @@ args, unknown = parser.parse_known_args()
 if os.environ.get("MOCK_MODE", "").lower() in ("true", "1", "yes"):
     args.mock = True
 
-# Global variables for model, tokenizer, and Elasticsearch
+# Global variables for model, tokenizer, and cached sections
 model = None
 tokenizer = None
-es_client = None
 device = "cpu"
+SECTIONS_CACHE = None
 
-es_url = os.environ.get("ELASTICSEARCH_URL", "http://127.0.0.1:9200")
-print(f"Connecting to Elasticsearch ({es_url})...")
-try:
-    es_client = Elasticsearch(es_url, request_timeout=5)
-    if es_client.ping():
-        print("Successfully connected to Elasticsearch!")
+def load_sections():
+    global SECTIONS_CACHE
+    if SECTIONS_CACHE is not None:
+        return SECTIONS_CACHE
+    sections_path = "sections.json"
+    if os.path.exists(sections_path):
+        try:
+            with open(sections_path, "r", encoding="utf-8") as f:
+                SECTIONS_CACHE = json.load(f)
+                print(f"Successfully loaded {len(SECTIONS_CACHE)} sections in-memory.")
+                return SECTIONS_CACHE
+        except Exception as e:
+            print(f"Error reading sections.json: {e}")
     else:
-        print("WARNING: Elasticsearch ping failed. Server may be starting or unreachable.")
-except Exception as e:
-    print(f"WARNING: Could not establish connection to Elasticsearch: {e}")
+        print("WARNING: sections.json not found. Run extraction script first.")
+    SECTIONS_CACHE = []
+    return SECTIONS_CACHE
 
 # Load model and tokenizer
 if args.mock:
@@ -106,38 +114,50 @@ else:
         print("Falling back to MOCK mode automatically.")
         args.mock = True
 
+def tokenize(text):
+    text = text.lower()
+    text = text.translate(str.maketrans('', '', string.punctuation))
+    return [w for w in text.split() if len(w) > 2]
+
 def search_legal_acts(query, limit=3):
     """
-    Search legal acts index in Elasticsearch for relevant sections.
+    Search legal acts using in-memory local sections database.
     """
-    if not es_client:
+    sections = load_sections()
+    if not sections:
         return []
-    try:
-        index_name = "legal_acts"
-        if not es_client.indices.exists(index=index_name):
-            return []
         
-        response = es_client.search(
-            index=index_name,
-            body={
-                "query": {
-                    "multi_match": {
-                        "query": query,
-                        "fields": ["content^2", "section_title", "act_name"]
-                    }
-                },
-                "size": limit
-            }
-        )
-        
-        hits = response['hits']['hits']
-        results = []
-        for hit in hits:
-            results.append(hit['_source'])
-        return results
-    except Exception as e:
-        print(f"Search error: {e}")
+    query_tokens = tokenize(query)
+    if not query_tokens:
         return []
+        
+    scored_sections = []
+    for sec in sections:
+        score = 0
+        act_name = sec.get('act_name', '').lower()
+        section_title = sec.get('section_title', '').lower()
+        section_num = sec.get('section_num', '').lower()
+        content = sec.get('content', '').lower()
+        
+        for token in query_tokens:
+            if token == section_num:
+                score += 50
+            # Title matches have high importance
+            title_count = section_title.count(token)
+            score += title_count * 10
+            # Act name matches have medium importance
+            act_count = act_name.count(token)
+            score += act_count * 5
+            # Content matches have base importance
+            content_count = content.count(token)
+            score += content_count * 1
+            
+        if score > 0:
+            scored_sections.append((score, sec))
+            
+    # Sort by score descending
+    scored_sections.sort(key=lambda x: x[0], reverse=True)
+    return [sec for score, sec in scored_sections[:limit]]
 
 @app.route("/")
 def index():
@@ -146,17 +166,13 @@ def index():
 @app.route("/api/status")
 def status():
     """
-    Returns the current status of Elasticsearch and LLM Engine.
+    Returns the current status of Local DB and LLM Engine.
     """
-    es_online = False
-    if es_client:
-        try:
-            es_online = es_client.ping()
-        except Exception:
-            pass
-            
+    sections = load_sections()
+    db_online = len(sections) > 0
     return jsonify({
-        "elasticsearch": es_online,
+        "database": db_online,
+        "document_count": len(sections),
         "model": args.mock or (model is not None),
         "device": "MOCK" if args.mock else device
     })
@@ -164,46 +180,27 @@ def status():
 @app.route("/api/acts")
 def get_acts():
     """
-    Returns unique acts indexed in Elasticsearch and their document counts.
+    Returns unique acts from local dataset and their document counts.
     """
-    if not es_client:
-        return jsonify([])
-    
-    try:
-        index_name = "legal_acts"
-        if not es_client.indices.exists(index=index_name):
-            return jsonify([])
-            
-        # Perform aggregation to get counts per act_name
-        response = es_client.search(
-            index=index_name,
-            body={
-                "size": 0,
-                "aggs": {
-                    "acts": {
-                        "terms": {
-                            "field": "act_name.keyword",
-                            "size": 50
-                        }
-                    }
-                }
-            }
-        )
-        
-        buckets = response['aggregations']['acts']['buckets']
-        acts = [{"name": bucket['key'], "count": bucket['doc_count']} for bucket in buckets]
-        
+    sections = load_sections()
+    if not sections:
         # Fallback to hardcoded list if empty for visual demo
-        if not acts:
-            acts = [
-                {"name": "Indian Partnership Act 1932", "count": 74},
-                {"name": "Powers Of Attorney Act 1882", "count": 6},
-                {"name": "Indian Christian Marriage Act 1872", "count": 88}
-            ]
+        acts = [
+            {"name": "Indian Partnership Act 1932", "count": 74},
+            {"name": "Powers Of Attorney Act 1882", "count": 6},
+            {"name": "Indian Christian Marriage Act 1872", "count": 88}
+        ]
         return jsonify(acts)
-    except Exception as e:
-        print(f"Error fetching acts list: {e}")
-        return jsonify([])
+        
+    act_counts = {}
+    for sec in sections:
+        act_name = sec.get('act_name')
+        if act_name:
+            act_counts[act_name] = act_counts.get(act_name, 0) + 1
+            
+    acts = [{"name": name, "count": count} for name, count in act_counts.items()]
+    acts.sort(key=lambda x: x['name'])
+    return jsonify(acts)
 
 @app.route("/api/chat", methods=["POST"])
 def chat():

@@ -593,7 +593,7 @@
             <div class="sidebar-footer">
                 <div class="status-badge">
                     <span class="status-dot" id="es-status-dot"></span>
-                    <span id="es-status-text">Elasticsearch: Online</span>
+                    <span id="es-status-text">Local DB: Online</span>
                 </div>
                 <div class="status-badge">
                     <span class="status-dot" id="model-status-dot"></span>
@@ -607,7 +607,7 @@
             <div class="chat-header">
                 <div class="chat-info">
                     <h1>Legal Query Chatbot</h1>
-                    <p id="chat-sub-text">Ask legal questions backed by verified acts from Elasticsearch</p>
+                    <p id="chat-sub-text">Ask legal questions backed by verified acts from the local database</p>
                 </div>
                 <div class="chat-actions">
                     <button class="btn-action" onclick="clearChat()" title="Clear Chat">
@@ -623,7 +623,7 @@
                         <i class="fa-solid fa-gavel"></i>
                     </div>
                     <h2>Welcome to LexAI</h2>
-                    <p>I am your specialized legal assistant fine-tuned on custom legal acts. Ask me any question, and I will search Elasticsearch for relevant sections to answer accurately.</p>
+                    <p>I am your specialized legal assistant fine-tuned on custom legal acts. Ask me any question, and I will search the local database for relevant sections to answer accurately.</p>
                     
                     <div class="suggested-questions">
                         <button class="suggested-btn" onclick="sendSuggested('What does the Indian Partnership Act state about the mode of determining a partnership?')">
@@ -677,12 +677,12 @@
                     // Update Elasticsearch indicator
                     const esDot = document.getElementById('es-status-dot');
                     const esText = document.getElementById('es-status-text');
-                    if (data.elasticsearch) {
+                    if (data.database) {
                         esDot.className = 'status-dot';
-                        esText.innerText = 'Elasticsearch: Online';
+                        esText.innerText = 'Local DB: Online (' + data.document_count + ' sections)';
                     } else {
                         esDot.className = 'status-dot offline';
-                        esText.innerText = 'Elasticsearch: Offline';
+                        esText.innerText = 'Local DB: Offline';
                     }
 
                     // Update Model indicator
