@@ -22,9 +22,7 @@ def main():
     if not torch.cuda.is_available():
         print("\n" + "="*85)
         print("ERROR: Fine-tuning requires a CUDA-compatible GPU, but none was detected by PyTorch.")
-        print("If you are running on a machine without a GPU, please skip the training step")
-        print("and run the server in Mock Mode:")
-        print("  .\\run_pipeline.ps1 -Action serve-mock")
+        print("Please run this script on a machine equipped with a CUDA-enabled GPU to train.")
         print("="*85 + "\n")
         return
 

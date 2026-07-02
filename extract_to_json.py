@@ -73,7 +73,6 @@ def main():
     print("Initializing MarkItDown...")
     md = MarkItDown()
     
-    all_sections = []
     training_data = []
     
     for pdf_path in pdf_files:
@@ -89,8 +88,6 @@ def main():
             print(f"Extracted {len(sections)} sections/articles.")
             
             for sec in sections:
-                all_sections.append(sec)
-                
                 # Generate training QA pairs
                 training_data.append({
                     "instruction": f"What is Section {sec['section_num']} of the {sec['act_name']} about, and what does it state?",
@@ -108,12 +105,6 @@ def main():
         except Exception as e:
             print(f"Error processing {filename}: {e}")
             
-    # Save the parsed sections for local in-memory search
-    sections_path = "sections.json"
-    with open(sections_path, "w", encoding="utf-8") as f:
-        json.dump(all_sections, f, indent=4, ensure_ascii=False)
-    print(f"Saved parsed sections to {sections_path}")
-        
     # Save the dataset to a JSON file for model training
     dataset_path = "dataset.json"
     with open(dataset_path, "w", encoding="utf-8") as f:
