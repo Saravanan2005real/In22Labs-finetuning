@@ -9,7 +9,7 @@ services:
     volumes:
       - ./lora_model:/app/lora_model
       - ./llama_base_model:/app/llama_base_model
-      - ./Act_Elastic search:/app/Act_Elastic search
+      - ./source_pdfs:/app/source_pdfs
       - ./templates:/app/templates
       - ./dataset.json:/app/dataset.json
       - ./sections.json:/app/sections.json

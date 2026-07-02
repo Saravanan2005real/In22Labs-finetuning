@@ -65,7 +65,7 @@ def clean_act_name(filename):
     return name
 
 def main():
-    pdf_dir = "Act_Elastic search"
+    pdf_dir = "source_pdfs"
     pdf_files = list(set(glob.glob(os.path.join(pdf_dir, "*.pdf")) + glob.glob(os.path.join(pdf_dir, "*.PDF"))))
     
     print(f"Found {len(pdf_files)} PDF files to process.")

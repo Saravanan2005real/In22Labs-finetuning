@@ -47,7 +47,7 @@ flowchart TD
 ```text
 Finetuning/
 │
-├── Act_Elastic search/        # Directory containing source legal PDFs
+├── source_pdfs/              # Directory containing source legal PDFs
 ├── extract_to_json.py        # Extracts PDF text and generates dataset.json
 ├── fine_tune.py              # Fine-tunes the base Llama model using Unsloth
 ├── run_pipeline.ps1          # PowerShell orchestrator to run extraction/training
@@ -88,7 +88,7 @@ pip install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git"
 Use the PowerShell runner `run_pipeline.ps1` to execute the steps:
 
 ### Step 1: Text Extraction to JSON
-Extract text from PDFs in the `Act_Elastic search` folder and generate the QA dataset (`dataset.json`):
+Extract text from PDFs in the `source_pdfs` folder and generate the QA dataset (`dataset.json`):
 ```powershell
 .\run_pipeline.ps1 -Action extract
 ```
