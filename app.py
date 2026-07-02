@@ -236,6 +236,21 @@ def chat():
     # 1. Search relevant documents in local in-memory dataset
     context_docs = search_legal_acts(query)
     
+    # Check if the query is a document-level summary/explanation query
+    is_summary_query = any(keyword in query.lower() for keyword in ["summarize", "explain", "what is", "about", "overview"])
+    has_specific_section = any(keyword in query.lower() for keyword in ["section ", "sec "])
+    
+    # If we found matches and it is a document-level summary query, fetch all sections of the matched act
+    if context_docs and is_summary_query and not has_specific_section:
+        top_act = context_docs[0]['act_name']
+        all_sections = load_sections()
+        act_sections = [s for s in all_sections if s['act_name'] == top_act]
+        try:
+            act_sections.sort(key=lambda s: int(s['section_num']) if s['section_num'].isdigit() else 999)
+        except Exception:
+            pass
+        context_docs = act_sections
+    
     # 2. Formulate RAG response
     if args.mock:
         # Clean, direct mock response generation with validation
@@ -252,7 +267,17 @@ def chat():
                             break
             
             if is_valid:
-                response = f"According to Section {doc['section_num']} ('{doc['section_title']}') of the {doc['act_name']}:\n\n{doc['content']}"
+                if is_summary_query and not has_specific_section and len(context_docs) > 1:
+                    bullets = []
+                    for s in context_docs:
+                        bullets.append(f"- {s['content'].strip()}")
+                    bullets_str = "\n".join(bullets)
+                    response = (
+                        f"G.O. (Ms.) No. {doc['act_name']} concerns the subject of this order. "
+                        f"Here is a summary of the key provisions and decisions taken:\n\n{bullets_str}"
+                    )
+                else:
+                    response = f"According to Section {doc['section_num']} ('{doc['section_title']}') of the {doc['act_name']}:\n\n{doc['content']}"
             else:
                 response = "The provided context does not contain the answer for this question."
         else:
@@ -272,6 +297,7 @@ def chat():
                 f"You are a strict legal/government order assistant.\n\n"
                 f"Answer the user's query relying ONLY on the provided Context. "
                 f"First, identify the exact G.O. number, department, date, and subject from the Context.\n"
+                f"If the query asks about what the G.O. is about, to explain it, or to summarize it, summarize the complete Government Order in 3 to 6 bullet points detailing all major decisions taken. Do not quote a single section unless specifically asked for a single section.\n"
                 f"If the retrieved Context is about a different G.O. or a different subject than what the user query asks about, say exactly:\n"
                 f"\"The provided context does not contain the answer for this question.\"\n\n"
                 f"Do not mix information from other documents. Do not answer from general knowledge or assume any missing details. "
