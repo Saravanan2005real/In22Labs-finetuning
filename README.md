@@ -6,10 +6,7 @@ This repository provides an automated pipeline to extract text from official leg
 
 ## 🏗️ System Architecture
 
-The following diagram illustrates the simplified pipeline:
-
-1. **Document Ingestion & Extraction**: Parses PDF documents into text using Microsoft's `markitdown` toolkit and extracts QA pairs.
-2. **Fine-Tuning**: Fine-tunes a base Llama model on the generated QA dataset using Unsloth.
+The following diagram illustrates the complete ingestion, fine-tuning, and upgraded hybrid search inference pipeline:
 
 ```mermaid
 flowchart TD
@@ -25,9 +22,22 @@ flowchart TD
         F & H -->|SFTTrainer| I[Fine-Tuning Run]
         I -->|Save Adapter Weights| J[lora_model]
     end
+
+    subgraph Inference ["3. Hybrid RAG Search & Inference"]
+        Q[User Chat Query] --> BM25[BM25 Keyword Search]
+        Q --> Semantic[Semantic Search: all-MiniLM-L6-v2]
+        BM25 --> Merge[Merge Candidates Pool]
+        Semantic --> Merge
+        Merge --> Rerank[CrossEncoder Re-ranker: ms-marco-MiniLM-L-6-v2]
+        Rerank --> TopDoc[Top 3 Re-ranked Sections]
+        TopDoc --> Prompt[LLM Prompt with Parametric Fallback]
+        Prompt --> LLM[Fine-Tuned Llama Inference]
+        LLM --> Out[Concise Direct Answer]
+    end
     
     style Ingestion fill:#1e293b,stroke:#475569,stroke-width:2px,color:#f8fafc
     style Training fill:#1e1b4b,stroke:#312e81,stroke-width:2px,color:#f8fafc
+    style Inference fill:#0f172a,stroke:#3b82f6,stroke-width:2px,color:#f8fafc
 ```
 
 ---
@@ -36,9 +46,12 @@ flowchart TD
 
 - **Microsoft MarkItDown Toolkit**: Automatic, fast PDF text extraction and parsing.
 - **QA Dataset Generation**: Automatically generates instructions and output answers from the parsed PDF contents.
+- **Hybrid RAG Search Pipeline**: Integrates BM25 keyword search and dense semantic vector search via `sentence-transformers/all-MiniLM-L6-v2`.
+- **Cross-Encoder Re-ranking**: Uses `cross-encoder/ms-marco-MiniLM-L-6-v2` to score and rank retrieved documents, ensuring the highest relevance is passed to the LLM.
+- **Parametric Fallback & Conciseness**: LLM prompt resolves context conflicts, outputs preamble-free direct answers, and falls back to fine-tuned parametric weights when the retrieved context is ambiguous.
 - **Optimized Fine-Tuning**: Integrates with `Unsloth` to perform fast 4-bit LoRA fine-tuning of Llama models.
 - **CPU-Safe Validation Check**: Gracefully checks for PyTorch CUDA support before starting GPU training, displaying warnings instead of crashing on CPU-only machines.
-- **Pipeline Orchestration**: Includes a simple PowerShell automation script (`run_pipeline.ps1`) to orchestrate extraction and training.
+- **Pipeline Orchestration**: Includes a simple PowerShell automation script (`run_pipeline.ps1`) to orchestrate extraction, training, and running the server.
 
 ---
 

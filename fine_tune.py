@@ -1,7 +1,38 @@
 import os
+import ctypes
+
+# Preload CUDA DLLs to resolve Windows dependency resolution order bugs
+torch_lib = r"C:\Users\Saravanan\Desktop\In22Labs\Finetuning\finetune_env\lib\site-packages\torch\lib"
+if os.path.exists(torch_lib):
+    try:
+        os.add_dll_directory(torch_lib)
+        for dll in ["c10.dll", "c10_cuda.dll", "cudart64_12.dll", "nvJitLink_120_0.dll", "nvrtc64_120_0.dll"]:
+            dll_path = os.path.join(torch_lib, dll)
+            if os.path.exists(dll_path):
+                ctypes.CDLL(dll_path)
+    except Exception as e:
+        pass
+
 import json
-from datasets import Dataset
 import torch
+import torch.utils._pytree
+
+# Patch missing sub-byte integer types dynamically for Windows compatibility with torchao
+for i in range(1, 8):
+    for prefix in ["int", "uint"]:
+        attr = f"{prefix}{i}"
+        if not hasattr(torch, attr):
+            class DummyDtype:
+                def __repr__(self):
+                    return f"torch.{attr}"
+            setattr(torch, attr, DummyDtype)
+
+# Patch missing register_constant in torch.utils._pytree for torchao compatibility
+if not hasattr(torch.utils._pytree, "register_constant"):
+    torch.utils._pytree.register_constant = lambda x: x
+
+from unsloth import FastLanguageModel
+from datasets import Dataset
 from trl import SFTTrainer, SFTConfig
 
 # Constants
@@ -10,12 +41,25 @@ MAX_SEQ_LENGTH = 2048
 OUTPUT_DIR = "lora_model"
 
 def formatting_prompts_func(examples):
-    instructions = examples["instruction"]
-    outputs      = examples["output"]
+    contexts = examples["context_str"]
+    queries = examples["query"]
+    outputs = examples["output"]
     texts = []
-    for instruction, output in zip(instructions, outputs):
-        text = f"<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\nYou are a helpful legal assistant who provides accurate information based on the official legal acts.<|eot_id|><|start_header_id|>user<|end_header_id|>\n\n{instruction}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n{output}<|eot_id|>"
-        texts.append(text)
+    for context, query, output in zip(contexts, queries, outputs):
+        prompt = (
+            f"<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
+            f"You are a strict legal/government order assistant.\n\n"
+            f"Answer the user's query relying ONLY on the provided Context. "
+            f"Answer the question directly and concisely. Do not include verbose preambles, meta-text, intro sentences, or mention G.O. details/subjects unless specifically requested.\n"
+            f"If the query asks about what the G.O. is about, to explain it, or to summarize it, summarize the complete Government Order in 3 to 6 bullet points detailing all major decisions taken.\n"
+            f"If the retrieved Context does not contain the answer for the question, say exactly:\n"
+            f"\"The provided context does not contain the answer for this question.\"\n\n"
+            f"Do not mix information from other documents. Do not answer from general knowledge or assume any missing details.\n\n"
+            f"Context:\n{context}<|eot_id|>"
+            f"<|start_header_id|>user<|end_header_id|>\n\n{query}<|eot_id|>"
+            f"<|start_header_id|>assistant<|end_header_id|>\n\n{output}<|eot_id|>"
+        )
+        texts.append(prompt)
     return { "text" : texts }
 
 def main():
@@ -26,7 +70,6 @@ def main():
         print("="*85 + "\n")
         return
 
-    from unsloth import FastLanguageModel
     print("Loading dataset...")
     if not os.path.exists("dataset.json"):
         print("ERROR: dataset.json not found! Please run extract_to_json.py first.")
@@ -47,6 +90,7 @@ def main():
         dtype = None,  # None for auto detection
         load_in_4bit = True,  # Reduced memory usage
     )
+    
 
     model = FastLanguageModel.get_peft_model(
         model,
@@ -67,10 +111,10 @@ def main():
 
     # Training Arguments
     training_args = SFTConfig(
-        per_device_train_batch_size = 2,
-        gradient_accumulation_steps = 4,
+        per_device_train_batch_size = 1,
+        gradient_accumulation_steps = 8,
         warmup_steps = 10,
-        max_steps = 100,  # Fast run for demo/validation purposes
+        max_steps = 120,  # Fast run for demo/validation purposes, increased for better RAG learning
         learning_rate = 2e-4,
         fp16 = not torch.cuda.is_bf16_supported(),
         bf16 = torch.cuda.is_bf16_supported(),
@@ -85,8 +129,13 @@ def main():
         dataset_text_field = "text",
         max_length = MAX_SEQ_LENGTH,
         dataset_num_proc = 1,
-        packing = False
+        packing = False,
+        eos_token = "<|eot_id|>"
     )
+
+    # Ensure both TrainingArguments.eos_token and tokenizer.eos_token are aligned to "<|eot_id|>"
+    training_args.eos_token = "<|eot_id|>"
+    tokenizer.eos_token = "<|eot_id|>"
 
     # Initialize SFTTrainer
     trainer = SFTTrainer(
